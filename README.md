@@ -1,10 +1,12 @@
 # dsh-channel-fallback
 
-让 **DeepSeek V4.1 Flash 优先走国际版（WorkBuddy，免费额度）、用不了自动切国内版（CodeBuddy）**，
-对上层完全透明：模型选择、计费、会话日志里看到的还是原来那个模型。
+把「**优先 A、A 用不了自动切 B**」的模型链，注册成 DSH 模型选择器里的**一个条目**。
 
-链是**可配置**的：不限于这两家渠道，任何 DSH 已注册的 provider 都能排进链里，
-支持多级兜底（A → B → C → …）。带一个可视化面板：改链、调顺序、**一键连通测试**、看切换统计。
+选中它，请求就按链上的顺序走；前一个失败，自动换下一个，对上层完全透明。
+不选它，什么都不会变 —— 装上插件不等于接管你的请求。
+
+支持任意多级兜底（A → B → C → …）、任意多条链、每站独立推理档位，
+带一个可视化面板：新建/改名/删除链、加减模型、调顺序、**一键连通测试**、看切换统计。
 
 ## 它解决什么问题
 
@@ -14,8 +16,35 @@
 所以「先免费、后付费」是严格更优的顺序 —— 但 WorkBuddy 会时不时撞上
 额度上限 / 频率限制 / 新加坡区额度耗尽。
 
-本插件在宿主 `llm/stream` 这条 waterfall 上挂一个监听器：
-请求命中链头就按链顺序试，**第一个真的吐出正文的候选胜出**。
+## 为什么是「注册一个 provider」而不是「拦 llm/stream」
+
+v0.4.0 用的是在宿主 `llm/stream` waterfall 上挂监听器的做法（命中链头就接管）。
+它有个根本问题：**装上插件就自动生效**，用户没有任何办法在界面上表达
+「这次我不想用链」。而且链头被硬编码在配置里，换一条链要改配置文件。
+
+v0.5.0 改成**注册一个虚拟 provider** `dsh-channel-chain`（显示名「渠道链」），
+每条链是它下面的一个 model（model id 就是链 id）。这样：
+
+- 链出现在**模型选择器**里，和真实渠道并列 —— 用户主动选才走链；
+- 会话的默认模型、模型切换、子 agent、后台任务**全部自动支持**，
+  因为它们本来就走同一套 `provider`/`model` 选择机制；
+- 不需要在宿主里加任何新概念，宿主也不知道「链」是什么。
+
+宿主契约（读 `@deepseek-ai/dsh-llm` 源码确认，2026-10-27）：
+
+```js
+llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModels, resolveModel, prepareCall, stream })
+```
+
+`listModels` 返回的每个 model 必须能被 `resolveModel` 解析出来，
+且 `provider`/`id`/`name` 必须对得上（否则 `INVALID_CATALOG` / `INVALID_MODEL_INFO`）。
+**`listModels` 返回空数组时整组会从选择器里消失**（宿主
+`buildModelCatalog` 有 `.filter(group => group.models.length > 0)`）—— 这正是
+「没有链时不该出现一个点了就报错的空组」的期望行为。
+
+`prepareCall` 返回的 `stream` 里，我们用**真实 provider** 再调一次
+`ctx.llm.stream({...options, provider: candidate.provider, model: candidate.model})`。
+这不是递归：宿主按 `options.provider` 查 adapter，此时查到的已经是真实渠道的 adapter。
 
 ## 为什么不用现成方案（逐条查过源码，2026-10-26）
 
@@ -29,27 +58,6 @@
 | `shouldFallbackToOtherChannel` | ❌ 是**同渠道切账号**（仅 429 + 1005/1113），不是切模型 |
 | OFM aggregate | ❌ `providerModelId()` 要求模型 id 前缀必须是 `src/providers/registry.json` 里已注册的 provider，无法凭空造一个指向本地网关的 provider |
 
-## 怎么实现的
-
-宿主 `@deepseek-ai/dsh-llm` 的 `LlmRuntime.streamWithRegistration()`：
-
-```js
-streamWithRegistration(options, prepared) {
-  return this.ctx.waterfall(this, 'llm/stream', options, () => this.adapterStream(options, prepared))
-}
-```
-
-cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
-> Each listener wraps the rest of the chain: calling `next()` invokes the next listener
-> (finally the built-in behavior); not calling it vetoes.
-
-所以监听器里可以换掉 `options.provider` / `options.model`，再调一次 `ctx.llm.stream()`
-发起备选调用。社区既有做法：`dsh-cost-meter` 的注释记录 modlens / vision-router
-就是「在监听器体内（瀑布派发期）急切发起上游调用」的包装路由插件。
-
-**递归保护**：用 `AsyncLocalStorage` 标记自己发起的调用，监听器见到标记立刻
-`next()` 透传，交给真正的 adapter。
-
 ## 关键行为（都有测试锁定）
 
 - **失败判定看 finish chunk**：宿主的 `adapterStream` 把 adapter 抛的错转成
@@ -57,13 +65,41 @@ cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
   所以不能靠 try/catch 判失败。
 - **思考阶段失败照样切**：`reasoning-delta` 不算「已提交」，思考内容整段丢弃
   —— 「想了半天才撞额度墙」正是最该切换的场景。
-- **一旦吐出正文就不再切**：否则前言不搭后语。已提交后中途出错，异常**原样上抛**
-  （对齐宿主「middleware / consumer failures remain thrown」的约定），绝不吞掉。
+- **一旦吐出正文就不再切**：否则前言不搭后语。已提交后中途出错，失败**如实透传**
+  （不吞掉，也不偷偷换站）。
 - **调用方取消不切备选**：`aborted` 不是故障，不再拿别的候选去打扰上游。
 - **空流视为失败**：正常结束却一个字正文都没有，对用户就是失败。
-- **只匹配链头**：链上的备选（比如 buddy）被别处直接请求时不接管，避免成环。
 - **不修改入参对象**：宿主可能把 `options` 冻结，一律返回新对象。
 - **提前退出会关掉上游迭代器**：否则 HTTP 流跑完、socket 泄漏。
+  这里有个易错点：消费方可能**就在「提交第一个正文块」那一刻** `break`，
+  此时 `restOf()` 还没被创建 —— 所以要一个独立的 `handedOff` 标志，
+  在进入 `restOf` **之前**置位，`finally` 里判它。
+- **候选不能是「渠道链」自己**：`/models` 列表和保存时都会拦，否则成环。
+
+## 推理档位怎么定
+
+优先级：**候选固定 > 链级 > 调用方**。
+
+| 层级 | 说明 |
+|---|---|
+| 候选固定 | 面板上每行一个下拉，写在这一站上。**这一站自己说了算** |
+| 链级 | 面板上链标题旁的下拉，作用于链上所有没写固定档位的站 |
+| 调用方 | 会话/选择器传进来的 `reasoningEffort` |
+
+为什么候选固定优先于链级：链上不同 provider 支持的档位可能根本不同
+（`workbuddy` 只有 `high`，`buddy` 有 `low`/`high`/`max`）。链级选 `low` 切到
+`workbuddy` 就会被宿主以 `UNSUPPORTED_REASONING_EFFORT` 拒掉。
+
+链的**档位并集**由 `resolveModel` 上报给选择器（各站 efforts 求并集，
+默认值取链头那站的）—— 用户在界面上看到的是全貌，具体哪站支持什么由运行时处理。
+
+降级规则（`pickEffort`）：
+
+- 候选写了 `null` → 这一站不指定档位（让上游用默认），不再往下找；
+- 候选/链级/调用方给了档位，但**这一站明确不支持** → 继续往下退，
+  最后都退不了就删掉字段；
+- **查不到**这一站支持什么（provider 离线、目录里没这个模型）→ **不猜，放行**，
+  让宿主抛准确的错误 —— 猜错比报错更糟。
 
 ## 配置
 
@@ -76,7 +112,8 @@ cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
       config:
         enabled: true
         chains:
-          - name: flash-free-first
+          - id: flash-free-first
+            name: flash-free-first
             candidates:
               - provider: workbuddy
                 model: deepseek-v4.1-flash
@@ -88,11 +125,12 @@ cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
 
 | 字段 | 说明 |
 |---|---|
-| `enabled: false` | 整体关闭（不注册监听器） |
-| `name` | 仅用于日志 |
-| `head` | 显式指定链头；默认取 `candidates[0]`。写非法则整条链丢弃 |
-| `candidates[].reasoningEffort` | 字符串 = 覆盖；`null` = 删掉该字段（跨 provider 档位不同时用） |
-| `candidates[].maxTokens` | 正整数 = 覆盖；`null` = 删掉 |
+| `enabled: false` | 整体关闭（不注册 provider） |
+| `id` | 链的 id = **模型选择器里的 model id**。不写则按 `name` 自动 slug |
+| `name` | 显示名，也是选择器里那一行 |
+| `reasoningEffort` | 链级档位 |
+| `candidates[].reasoningEffort` | 字符串 = 固定该站档位；`null` = 不指定（用上游默认） |
+| `candidates[].maxTokens` | 正整数 = 覆盖；`null` = 删掉该字段 |
 
 配置非法时**静默不注册**，绝不让宿主起不来。
 
@@ -100,35 +138,45 @@ cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
 
 ## 可视化面板（可编辑）
 
-设置页里多一个 **「渠道回退」** 分区（紧跟在「微信」后面），显示：
+设置页里多一个 **「渠道链」** 分区，显示：
 
-- **链**：每个候选一行，带序号、「优先」/「兜底」标签、渠道名，右侧是 `↑` `↓` `删除`；
+- **链**：每条链一张卡片，链名可改、链级档位可选、带删除按钮；
+  每个候选一行，带序号、「优先」/「兜底」标签、渠道名、**倍率**、
+  **推理档位下拉**，右侧是 `测试` `↑` `↓` `删除`；
 - **计数**：请求 / 切换 / 成功 / 全挂 / 取消 / 直通 六格；
 - **事件**：最近 60 条，倒序（新的在上），每条带时间、类型、候选与耗时 / 尝试次数、
   失败码与 HTTP 状态、失败消息。
+
+顶部有一行说明：**在会话的模型选择器里选「渠道链 · 链名」即可启用；不选就不影响任何请求。**
 
 ### 能改什么
 
 | 操作 | 行为 |
 |---|---|
+| `+ 新建链` | 追加一条空链，名字自动编号，id 按名字 slug（冲突则加 `-2`） |
+| 链名输入框 | 改名，**同时换新 id** —— 同名不同 id 会让选择器里出现两个看不出区别的条目 |
+| 链级档位下拉 | 选项 = 链上各站档位的**并集**（具体降级由运行时处理） |
+| `删链` | 删掉整条链；**只剩一条时禁用** |
+| 候选档位下拉 | 每站固定档位；第一项是「跟随上游默认」 |
 | `↑` / `↓` | 调整候选顺序 —— **第一个永远是优先尝试的那站** |
-| `删除` | 从链里去掉一个候选；**只剩一个时按钮禁用**（删空等于没有回退） |
+| `删除` | 从链里去掉一个候选（链**允许没有候选**，面板会提示「先加一个」） |
 | `+ 添加模型` | 弹出模型清单，按渠道筛选，点一下加进链尾；已在链里的显示「已加入」且不可点 |
 | `测试` | 向该模型发一次极小请求（`Reply with exactly: OK`，30 秒超时），**见到正文即成功**；徽章显示 `✓ 1.2s` 或 `✗ 错误码`，方便发现挂掉的候选随手删掉 |
-| `保存` | `POST /api/channel-fallback/chains`，**写盘成功后才改内存**，下一个请求立即走新链 |
+| `保存` | `POST /api/channel-fallback/chains`，**写盘成功后才改内存**，保存后立刻广播 `llm/adapters-updated`，选择器里的分组立即刷新 |
 | `放弃修改` | 草稿回到快照的样子 |
 | `恢复默认` | 先要确认，再 `POST {reset:true}` —— 删掉状态文件，链回到 `cordis.patch.yml` 的配置 |
 
 改动只落在**草稿**上，点「保存」才落盘；没保存时标题栏会显示「有未保存的改动」。
-保存失败会把后端给的原因（比如「第 1 条链至少有 1 个候选」）原样显示出来，
-并且**同时**继续显示「有未保存的改动」—— 存失败不等于改动没了。
+保存失败会把后端给的原因原样显示出来，并且**同时**继续显示「有未保存的改动」
+—— 存失败不等于改动没了。
+
+**`id` 必须原样带回**：它是模型选择器里的 model id，也是会话里已经记住的选择。
+草稿丢掉 id 再保存，等于把所有正在用这条链的会话换成新 id，用户的选择会突然失效。
 
 连通测试的几个设计点：
 
 - 测试走**真的 adapter 流**（`llm.stream` 直调），不是只查目录 —— 「目录里有」
   不等于「现在能用」；
-- 用 `AsyncLocalStorage` 标记自己发起的调用，测试流量**不会被路由接管、不写进
-  事件流、不进计数**；
 - 测试结果永远是 HTTP 200（`ok` 在 body 里），只有参数错（400）、同模型并发
   测试（409）、`llm` 服务缺失（503）才是非 200 —— 前端好渲染徽章。
 
@@ -156,14 +204,21 @@ cordis 的 waterfall 语义（`events.ts:79-84` 原文）：
 
 | 方法与路径 | 说明 |
 |---|---|
-| `GET /api/channel-fallback/state` | 快照：链、计数、事件，外加 `editable` / `source` / `savedAt` / `revision` / `defaults` / `providers` / `file` |
-| `POST /api/channel-fallback/chains` | 保存整份链；`{reset:true}` 恢复默认。body 上限 64KB，超限 413，坏 JSON 400 |
-| `GET /api/channel-fallback/models` | 列出可选模型（懒加载，`?provider=buddy` 可过滤）。单个渠道查不到不影响其它，进 `failed` |
-| `POST /api/channel-fallback/test` | 连通测试。body 写 `{provider, model}`（可测没进链的模型）或 `{chainIndex, candidateIndex}`（测链上第几站）；返回 `{ok, totalMs, ttft?}` 或 `{ok:false, error, code, status?}` |
+| `GET /api/channel-fallback/state` | 快照：链（含 `id`、倍率）、计数、事件，外加 `editable` / `source` / `savedAt` / `revision` / `defaults` / `providers` / `file` / `providerId` / `providerName` |
+| `POST /api/channel-fallback/chains` | 保存整份链；`{reset:true}` 恢复默认。body 上限 64KB，超限 413，坏 JSON 400，候选含渠道链自己 400 |
+| `GET /api/channel-fallback/models` | 列出可选模型（懒加载，`?provider=buddy` 可过滤）。**已剔除渠道链自己**；单个渠道查不到不影响其它，进 `failed` |
+| `GET /api/channel-fallback/efforts` | 查某站的推理档位，需要 `?provider=&model=`；查不到也回 200 并带 `error` |
+| `POST /api/channel-fallback/test` | 连通测试。body 写 `{provider, model}`（可测没进链的模型）或 `{chainIndex, candidateIndex}`（测链上第几站）；返回 `{ok, totalMs}` 或 `{ok:false, error, code, status?}` |
 
-`/chains` 只收 POST、`/models` 只收 GET/HEAD，其余方法回 405 且带 `allow` 头。
-列模型走的是宿主的 `llm.listProviders()` + 逐 provider `llm.listModels()` —— 宿主
-**没有**聚合的 `catalog()`，只能这样拼；某个渠道拉取失败不该让整页空白。
+`/chains` 和 `/test` 只收 POST，`/models` 和 `/efforts` 只收 GET/HEAD，
+其余方法回 405 且带 `allow` 头。列模型走的是宿主的 `llm.listProviders()` +
+逐 provider `llm.listModels()` —— 宿主**没有**聚合的 `catalog()`，只能这样拼；
+某个渠道拉取失败不该让整页空白。
+
+**倍率预热**：倍率是渠道拼在模型显示名里的（形如 `Deepseek-V4.1-Flash · x0.00→免费`），
+从 `listModels` 的 `name` 里解析。`/state` 会先 `await catalog.warm(...)`
+把链上各站的模型清单拉一遍（带 5 分钟 TTL 缓存）再出快照 —— 否则首次打开面板
+倍率全是空的，用户会以为没实现。
 
 ### 安全栅栏（必须有，不是可选）
 
@@ -186,6 +241,10 @@ rebinding 骗进环回的网页，都能读到这页数据。
 
 `connection` 用 **thunk 每次请求重新求值**，不能抓一次实例 —— 它可能比本插件晚发布，
 缓存了就会永远停在「服务不存在」这个降级分支上。
+
+**面板先挂、adapter 后注册**：`llm` 服务不可用时也要把面板挂上 ——
+面板是观测面 + 用户修链的唯一入口，不能因为 adapter 注册失败就一起陪葬。
+`registration` 因此用 thunk 传给面板 handler。
 
 为什么是「挂 `webServer`」而不是「注册 adapter」：`webServer` 必须通过
 `ctx.inject(['webServer'], …)` 拿 —— 写进插件顶层 `inject` 会让 headless profile
@@ -233,7 +292,10 @@ dsh plugin --profile web add github:KaBshou/dsh-channel-fallback
 dsh plugin --profile web add <本仓库检出的路径>
 ```
 
-重启 DSH 生效（面板也要重启后才出现）。
+**重启 DSH 生效**（provider 是启动时注册的；面板也要重启后才出现）。
+
+装好后打开设置页 →「渠道链」，配好链；再到任意会话的**模型选择器**里
+选「渠道链」分组下的那条链即可。
 
 要求：DSH `0.2.x`（peerDependencies 写的是 `>=0.2.0-rc.1 <0.3.0-0`）、Node `^22.19.0 || >=24.0.0`。
 
@@ -247,10 +309,10 @@ npm test
 等价于依次跑：
 
 ```powershell
-node --test lib/chain.test.js lib/state.test.js lib/store.test.js   # 41 项单测（路由 16 + 记录 8 + 持久层 17）
-node probe.mjs           # 15 项整链编排验证（假 ctx 复刻宿主瀑布语义）
-node probe-panel.mjs     # 33 项宿主面板验证（路由、保存、列模型、热生效、413/写盘失败、信任栅栏 5 组、方法限制、连通测试 7 项）
-node probe-client.mjs    # 28 项浏览器侧验证（mini React + 假 DOM + vm 求值真实 client.js，含增删改/保存/恢复默认/测试按钮）
+node --test lib/chain.test.js lib/state.test.js lib/store.test.js   # 41 项单测（链 16 + 记录 8 + 持久层 17）
+node probe.mjs           # 18 项整链编排验证（假 ctx 复刻宿主 adapter 语义）
+node probe-panel.mjs     # 40 项宿主面板验证（路由、保存、列模型、档位查询、热生效、413/写盘失败、信任栅栏 5 组、方法限制、连通测试）
+node probe-client.mjs    # 28 项浏览器侧验证（mini React + 假 DOM + vm 求值真实 client.js，含新建/改名/删链/档位/保存/恢复默认/测试按钮）
 node probe-redgreen.mjs  # 17 项红绿验证（内存里改坏 client.js，断言对应用例真的会红）
 ```
 
@@ -263,19 +325,43 @@ node probe-redgreen.mjs  # 17 项红绿验证（内存里改坏 client.js，断�
 都找不到，所有点击用例集体误报「按钮不存在」；`useEffect` 只能跑第一轮，
 否则每次重渲都会重新 `load()`，把用户刚做的编辑冲掉。
 
-### 真实宿主端到端（已通过）
+探针还必须**隔离状态文件**：`probe.mjs` 在 import 之后设
+`process.env.DSH_CHANNEL_FALLBACK_STATE = <tmp>`（`stateFilePath()` 每次调用现读
+环境变量，所以 import 后设置也有效），否则会读到用户真实的
+`~/.dsh/channel-fallback/chains.json` 并把它覆盖掉，所有断言都在测「用户当前的链」。
 
-用临时 profile（headless + 本插件）跑真实进程，
-把默认模型与链头都指到 `workbuddy/no-such-model-xyz`（必然 400）：
+### 真实宿主端到端（已通过，2026-10-27）
+
+临时 profile + 本插件跑真实进程（端口 3098），三件事全绿：
+
+**1. 渠道链真的进了宿主的模型目录**（`session/modelCatalog` 远程调用）：
 
 ```
-[14:26:32.401Z] 已装载 1 条链：fb-test-proof: workbuddy/no-such-model-xyz → buddy/deepseek-v4.1-flash
-[14:26:33.801Z] 链跳过 workbuddy/no-such-model-xyz：INVALID_REQUEST status=400 workbuddy: 当前模型不可用…
-[14:26:35.724Z] 链跳过 buddy/deepseek-v4.1-flash：UNKNOWN session-title provider "session-title-first-prompt-llm" was disposed
+ok=true groups=14
+ · deepseek-account — 2      · buddy — 3          · our-free-model — 4
+ · agnes — 1                 · workbuddy — 4      · dsh-channel-chain ★ — 1
+ · codearts — 1              · cline — 4          · loomy — 1  · raccoon — 1
+ · minimax — 1               · gemini — 1         · modlens-* — 2
+
+id   = flash-free-first
+name = flash-free-first（workbuddy/deepseek-v4.1-flash → buddy/deepseek-v4.1-flash）
+档位 = low/high/max  默认 = high      ← 各站并集
 ```
 
-最终模型输出 **「收到」** —— 第 1 站真失败、自动跳到第 2 站并成功。
-（末尾那条 `session-title…was disposed` 是会话标题生成用的旁路小请求被插件接管后自行放弃，不影响主对话。）
+**2. 整条链能跑通**：`POST /test {provider:'dsh-channel-chain', model:'flash-free-first'}`
+→ `{ok:true, totalMs:2766}`。
+
+**3. 真失败真的会切**：存一条链头指向 `workbuddy/no-such-model-xyz`（必然 400）的链，
+再测它：
+
+```
+事件: start(failover-probe)
+      skip(workbuddy/no-such-model-xyz)
+      win(buddy/deepseek-v4.1-flash)
+计数: {requests:2, switches:1, wins:2, exhausted:0, aborted:0, passthrough:0}
+```
+
+`switches: 1` 就是自动切换的铁证。
 
 诊断日志（每次切换写一行）：
 
@@ -283,3 +369,18 @@ node probe-redgreen.mjs  # 17 项红绿验证（内存里改坏 client.js，断�
 $env:DSH_CHANNEL_FALLBACK_LOG = '1'
 # 日志：%TEMP%\dsh-channel-fallback.log
 ```
+
+## 版本
+
+- **v0.5.0** — 架构转向：链从「llm/stream 拦截器」变成「模型选择器里的一个 provider」。
+  新增多链（新建/改名/删除）、倍率显示、每站与链级推理档位、`/efforts` 接口、
+  `warm()` 倍率预热、`handedOff` 修 socket 泄漏。41 单测 + 18 编排 + 40 面板 +
+  28 客户端 + 17 红绿全绿。
+- **v0.4.0** — 首个公开发布：可编辑链 + 可视化面板 + 连通测试。
+- **v0.3.0** — 后端支持编辑链（`/chains` 保存、状态文件）。
+- **v0.2.0** — 可视化面板（只读）。
+- **v0.1.0** — 链式回退核心。
+
+## 许可
+
+MIT

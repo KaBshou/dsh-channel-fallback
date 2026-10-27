@@ -37,14 +37,28 @@
     zh: {
       nav: '渠道回退',
       title: '渠道回退',
-      intro: '主模型失败时自动换下一个渠道，对上层完全透明。改动保存后立刻生效，不用重启。',
+      intro: '链就是模型选择器里的一个条目：选中它，请求按链上的顺序走，前一个失败自动换下一个。改动保存后立刻生效，不用重启。',
+      howto: '在会话的模型选择器里选「渠道链 · 链名」即可启用；不选就不影响任何请求。',
       refresh: '刷新',
       refreshing: '读取中…',
       loadFailed: '读不到数据',
       loadFailedHint: '宿主侧面板 API 没响应。插件路由可能仍在工作，只是这一页拿不到数据。',
       disabled: '插件已禁用（config.enabled === false）',
-      noChains: '还没有链。可以先恢复默认，再在链里加模型。',
+      noChains: '还没有链。点「新建链」开始配一条。',
       chainTitle: '链',
+      newChain: '+ 新建链',
+      newChainName: '链 {n}',
+      deleteChain: '删链',
+      onlyOneChain: '至少要留一条链',
+      chainName: '链名',
+      chainNameHint: '链名会显示在模型选择器里；改链名会同时换一个新的链 id。',
+      chainEffort: '整条链的档位',
+      effortDefault: '跟随上游默认',
+      effortUnsupported: '不支持档位',
+      effortLoading: '查档位…',
+      effortHint: '候选自己选了档位就以候选为准；否则用这里；都没选就交给上游默认。',
+      rate: '倍率',
+      rateUnknown: '倍率未知',
       priority: '优先',
       fallback: '兜底',
       addModel: '+ 添加模型',
@@ -59,12 +73,13 @@
       restoreYes: '确认恢复',
       restoreNo: '取消',
       dirtyHint: '有未保存的改动',
-      savedOk: '已保存，下一个请求就走新链',
+      savedOk: '已保存。选择器里的「渠道链」分组会立刻刷新。',
       sourceConfig: '链来自配置文件',
       sourceFile: '链来自面板保存',
       savedAt: '保存于 {t}',
       revision: '第 {n} 次修改',
       onlyOneLeft: '链里至少要留一个模型',
+      noCandidate: '这条链还没有模型，先加一个。',
       test: '测试',
       testing: '测试中…',
       testOk: '✓ {n}',
@@ -103,14 +118,28 @@
     en: {
       nav: 'Channel fallback',
       title: 'Channel fallback',
-      intro: 'Falls back to the next channel when the primary fails. Changes take effect right after saving — no restart.',
+      intro: 'A chain is one entry in the model picker: pick it and the request walks the chain, moving on when a step fails. Changes apply right after saving — no restart.',
+      howto: 'Select "Channel chain · name" in the model picker to use it; leave it unselected and nothing changes.',
       refresh: 'Refresh',
       refreshing: 'Loading…',
       loadFailed: 'Cannot load data',
       loadFailedHint: 'The host-side panel API did not answer. Routing may still work; only this page is blind.',
       disabled: 'Plugin disabled (config.enabled === false)',
-      noChains: 'No chains yet. Restore defaults first, then add models.',
+      noChains: 'No chains yet. Click "New chain" to make one.',
       chainTitle: 'Chains',
+      newChain: '+ New chain',
+      newChainName: 'Chain {n}',
+      deleteChain: 'Del chain',
+      onlyOneChain: 'Keep at least one chain',
+      chainName: 'Chain name',
+      chainNameHint: 'The name shows up in the model picker; renaming also gives the chain a new id.',
+      chainEffort: 'Chain-wide reasoning effort',
+      effortDefault: 'Follow upstream default',
+      effortUnsupported: 'No effort levels',
+      effortLoading: 'Loading efforts…',
+      effortHint: 'A candidate that pins its own effort wins; otherwise this applies; otherwise the upstream default.',
+      rate: 'Rate',
+      rateUnknown: 'rate unknown',
       priority: 'primary',
       fallback: 'fallback',
       addModel: '+ Add model',
@@ -125,12 +154,13 @@
       restoreYes: 'Restore',
       restoreNo: 'Cancel',
       dirtyHint: 'Unsaved changes',
-      savedOk: 'Saved. The next request uses the new chain.',
+      savedOk: 'Saved. The "Channel chain" group in the picker refreshes immediately.',
       sourceConfig: 'Chains from config file',
       sourceFile: 'Chains saved from this panel',
       savedAt: 'saved {t}',
       revision: 'revision {n}',
       onlyOneLeft: 'A chain needs at least one model',
+      noCandidate: 'This chain has no models yet — add one.',
       test: 'Test',
       testing: 'Testing…',
       testOk: '✓ {n}',
@@ -219,14 +249,21 @@
 .dcf-btn-danger { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
 .dcf-btn-mini { padding: 2px 7px; font-size: 11px; border-radius: 5px; }
 .dcf-section { display: flex; flex-direction: column; gap: 10px; }
+.dcf-section-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .dcf-section-title { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
   color: var(--dsw-alias-label-tertiary); margin: 0; }
 .dcf-card { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px;
   background: var(--dsw-alias-bg-layer-1); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-.dcf-chain-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.dcf-chain-name { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dcf-chain-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.dcf-chain-name { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary);
+  flex: 1 1 160px; min-width: 0; }
 .dcf-chain-meta { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.dcf-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center;
+.dcf-input, .dcf-select { font: inherit; font-size: 12px; padding: 3px 7px; border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary); }
+.dcf-input:disabled, .dcf-select:disabled { opacity: .6; cursor: default; }
+.dcf-select { flex: 0 0 auto; max-width: 200px; }
+.dcf-row { display: grid; grid-template-columns: 30px 1fr auto auto; gap: 8px; align-items: center;
   padding: 6px 8px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-layer-2); }
 .dcf-row-primary { border-color: var(--dsw-alias-state-business-primary); }
@@ -234,6 +271,7 @@
 .dcf-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dcf-row-model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
   color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; }
+.dcf-rate { font-size: 10px; color: var(--dsw-alias-state-warning-primary); }
 .dcf-row-sub { font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .dcf-tag { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
 .dcf-row-actions { display: flex; gap: 4px; align-items: center; }
@@ -314,24 +352,54 @@
     }
   }
 
-  /** 只留面板认识的字段，别把后端结构直接搬进草稿（保存时会原样回传）。 */
+  /**
+   * 只留面板认识的字段，别把后端结构直接搬进草稿（保存时会原样回传）。
+   *
+   * `id` 必须保留 —— 它就是模型选择器里的 model id，也是会话里已经记住的
+   * 选择。草稿丢掉 id 再保存，等于把所有正在用这条链的会话换成了新 id，
+   * 用户的选择会突然失效（`normalizeChains` 会按链名重新 slug 出一个新 id）。
+   */
   function cloneChains(chains) {
     if (!Array.isArray(chains)) return []
-    return chains.map((chain) => ({
-      name: typeof chain?.name === 'string' ? chain.name : '',
-      candidates: (Array.isArray(chain?.candidates) ? chain.candidates : [])
-        .filter((candidate) => typeof candidate?.provider === 'string' && typeof candidate?.model === 'string')
-        .map((candidate) => {
-          const out = { provider: candidate.provider, model: candidate.model }
-          if (candidate.reasoningEffort !== undefined) out.reasoningEffort = candidate.reasoningEffort
-          if (candidate.maxTokens !== undefined) out.maxTokens = candidate.maxTokens
-          return out
-        }),
-    }))
+    return chains.map((chain) => {
+      const out = {
+        name: typeof chain?.name === 'string' ? chain.name : '',
+        candidates: (Array.isArray(chain?.candidates) ? chain.candidates : [])
+          .filter((candidate) => typeof candidate?.provider === 'string' && typeof candidate?.model === 'string')
+          .map((candidate) => {
+            const item = { provider: candidate.provider, model: candidate.model }
+            if (candidate.reasoningEffort !== undefined) item.reasoningEffort = candidate.reasoningEffort
+            if (candidate.maxTokens !== undefined) item.maxTokens = candidate.maxTokens
+            return item
+          }),
+      }
+      if (typeof chain?.id === 'string' && chain.id !== '') out.id = chain.id
+      if (typeof chain?.reasoningEffort === 'string') out.reasoningEffort = chain.reasoningEffort
+      return out
+    })
   }
 
   function labelOf(candidate) {
     return `${candidate.provider}/${candidate.model}`
+  }
+
+  /** 链名改了要换新 id（否则选择器里两个同名条目没法区分）。 */
+  function nextChainId(name, chains) {
+    const base =
+      String(name || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'chain'
+    const taken = new Set(
+      (Array.isArray(chains) ? chains : []).map((chain) => chain?.id).filter((id) => typeof id === 'string'),
+    )
+    if (!taken.has(base)) return base
+    for (let index = 2; index <= 999; index += 1) {
+      const candidate = `${base}-${index}`
+      if (!taken.has(candidate)) return candidate
+    }
+    return `${base}-${Date.now().toString(36)}`
   }
 
   const name = 'channel-fallback'
@@ -500,17 +568,37 @@
       }
 
       /**
-       * 链里的一行：序号 + 模型 + 操作按钮（上移/下移/删除 + 测试）。
+       * 链里的一行：序号 + 模型 + 倍率 + 档位下拉 + 操作按钮。
        *
        * 测试是异步的，状态存在 `Page` 的 `tests` 里（按 `labelOf` 键）：
        * `{phase: 'running'|'ok'|'fail', totalMs?, error?, code?}`。
        * 没有记录 = 还没测过；`running` 期间按钮禁用并显示「测试中…」。
        * 结果以徽章形式长在本行尾部 —— 放在操作按钮之外，避免按钮换行把它挤没。
+       *
+       * 档位下拉的选项来自 `Page` 里的 `effortsOf(candidate)`（后端 `/efforts`
+       * 查该站真实支持的档位）。查不到时给空列表 + 提示，不假装有档位。
        */
-      function CandidateRow({ chainIndex, index, candidate, total, editable, t, onMove, onRemove, onTest, test }) {
+      function CandidateRow({
+        chainIndex,
+        index,
+        candidate,
+        total,
+        editable,
+        t,
+        onMove,
+        onRemove,
+        onTest,
+        onEffort,
+        test,
+        effortState,
+        rate,
+      }) {
         const locked = editable !== true
         const label = labelOf(candidate)
         const running = test !== undefined && test.phase === 'running'
+        const efforts = Array.isArray(effortState?.efforts) ? effortState.efforts : []
+        const effortValue = typeof candidate.reasoningEffort === 'string' ? candidate.reasoningEffort : ''
+        const effortTitle = effortState?.phase === 'loading' ? t.effortLoading : efforts.length === 0 ? t.effortUnsupported : t.effortHint
         return h(
           'div',
           { className: index === 0 ? 'dcf-row dcf-row-primary' : 'dcf-row' },
@@ -518,7 +606,12 @@
           h(
             'div',
             { className: 'dcf-row-main' },
-            h('span', { className: 'dcf-row-model' }, candidate.model),
+            h(
+              'span',
+              { className: 'dcf-row-model' },
+              candidate.model,
+              typeof rate?.rate === 'string' && rate.rate !== '' && h('span', { className: 'dcf-rate', title: rate.rateLabel ?? t.rate }, ` ${rate.rate}`),
+            ),
             h(
               'span',
               { className: 'dcf-row-sub' },
@@ -526,6 +619,18 @@
               ' ',
               candidate.provider,
             ),
+          ),
+          h(
+            'select',
+            {
+              className: 'dcf-select',
+              title: effortTitle,
+              value: effortValue,
+              disabled: locked || efforts.length === 0,
+              onChange: (event) => onEffort(chainIndex, index, event.target.value),
+            },
+            h('option', { value: '' }, t.effortDefault),
+            ...efforts.map((effort) => h('option', { key: effort.id, value: effort.id }, effort.name)),
           ),
           h(
             'div',
@@ -578,8 +683,10 @@
               {
                 type: 'button',
                 className: 'dcf-btn dcf-btn-mini dcf-btn-danger',
-                title: total <= 1 ? t.onlyOneLeft : t.remove,
-                disabled: locked || total <= 1,
+                title: t.remove,
+                // v0.5.0 起链允许没有候选（面板会提示「先加一个」），
+                // 所以这里不再因为「只剩一个」而禁用 —— 用户可以清空重配。
+                disabled: locked,
                 onClick: () => onRemove(chainIndex, index),
               },
               t.remove,
@@ -712,6 +819,10 @@
         // `{phase: 'running'|'ok'|'fail', totalMs?, error?, code?}`。
         // 键在测试结束后保留 —— 徽章一直显示，直到同一行再测一次。
         const [tests, setTests] = React.useState({})
+        // 每个候选支持的推理档位，按 `labelOf(candidate)` 键：
+        // `{phase: 'loading'|'ready', efforts: [{id,name}], defaultEffort?, error?}`。
+        // 后端 `/efforts` 查不到就 `error` 有值 —— 此时下拉是空的，不假装有档位。
+        const [efforts, setEfforts] = React.useState({})
 
         const load = React.useCallback(async () => {
           setPhase((current) => (current === 'ready' ? 'refreshing' : 'loading'))
@@ -722,6 +833,7 @@
             setPhase('ready')
             setSavePhase('idle')
             setResetArmed(false)
+            setEfforts({})
           } catch (error) {
             setSnapshot(undefined)
             setDraft(undefined)
@@ -747,6 +859,49 @@
           setSavePhase('idle')
         }
 
+        /** 改整条链（链名、链级档位）—— 和改候选分开，语义不同。 */
+        const editChain = (chainIndex, patch) => {
+          setDraft((current) => {
+            if (!Array.isArray(current)) return current
+            return current.map((chain, index) => (index === chainIndex ? { ...chain, ...patch } : chain))
+          })
+          setSavePhase('idle')
+        }
+
+        /**
+         * 改链名要同时换 id：id 就是模型选择器里的 model id，同名不同 id
+         * 会让选择器里出现两个看不出区别的条目。新 id 由 `nextChainId`
+         * 按新名字 slug 出来并避开已有 id。
+         */
+        const renameChain = (chainIndex, value) => {
+          setDraft((current) => {
+            if (!Array.isArray(current)) return current
+            const next = current.map((chain, index) => (index === chainIndex ? { ...chain, name: value } : chain))
+            const renamed = { ...next[chainIndex], id: nextChainId(value, next.filter((_, at) => at !== chainIndex)) }
+            next[chainIndex] = renamed
+            return next
+          })
+          setSavePhase('idle')
+        }
+
+        const addChain = () => {
+          setDraft((current) => {
+            const list = Array.isArray(current) ? current : []
+            const name = fill(t.newChainName, list.length + 1)
+            const chain = { id: nextChainId(name, list), name, candidates: [] }
+            return [...list, chain]
+          })
+          setSavePhase('idle')
+        }
+
+        const removeChain = (chainIndex) => {
+          setDraft((current) => {
+            if (!Array.isArray(current) || current.length <= 1) return current
+            return current.filter((_, index) => index !== chainIndex)
+          })
+          setSavePhase('idle')
+        }
+
         const moveCandidate = (chainIndex, index, delta) => {
           editCandidates(chainIndex, (list) => {
             const target = index + delta
@@ -759,8 +914,86 @@
         }
 
         const removeCandidate = (chainIndex, index) => {
-          editCandidates(chainIndex, (list) => (list.length <= 1 ? list : list.filter((_, at) => at !== index)))
+          editCandidates(chainIndex, (list) => list.filter((_, at) => at !== index))
         }
+
+        /** 改某一站固定的档位；空字符串 = 不指定（跟随链级/调用方）。 */
+        const setCandidateEffort = (chainIndex, index, value) => {
+          editCandidates(chainIndex, (list) => list.map((candidate, at) => {
+            if (at !== index) return candidate
+            const next = { ...candidate }
+            if (value === '') delete next.reasoningEffort
+            else next.reasoningEffort = value
+            return next
+          }))
+        }
+
+        /** 改链级档位；空字符串 = 不指定。 */
+        const setChainEffort = (chainIndex, value) => {
+          const patch = value === '' ? { reasoningEffort: undefined } : { reasoningEffort: value }
+          setDraft((current) => {
+            if (!Array.isArray(current)) return current
+            return current.map((chain, index) => {
+              if (index !== chainIndex) return chain
+              const next = { ...chain }
+              if (patch.reasoningEffort === undefined) delete next.reasoningEffort
+              else next.reasoningEffort = patch.reasoningEffort
+              return next
+            })
+          })
+          setSavePhase('idle')
+        }
+
+        /**
+         * 懒查某一站支持的档位（`GET /efforts?provider=&model=`）。
+         *
+         * 查过就缓存（键是 `labelOf`）；查失败也缓存，`error` 里带原因，
+         * 这样用户能看到「查不到」而不是一个永远转圈的下拉。
+         */
+        const loadEfforts = async (candidate) => {
+          const key = labelOf(candidate)
+          setEfforts((current) => (current[key] === undefined ? { ...current, [key]: { phase: 'loading', efforts: [] } } : current))
+          try {
+            const query = `?provider=${encodeURIComponent(candidate.provider)}&model=${encodeURIComponent(candidate.model)}`
+            const data = await readJson(`/efforts${query}`, 15000)
+            setEfforts((current) => ({
+              ...current,
+              [key]: {
+                phase: 'ready',
+                efforts: Array.isArray(data.efforts) ? data.efforts : [],
+                defaultEffort: typeof data.defaultEffort === 'string' ? data.defaultEffort : undefined,
+                error: typeof data.error === 'string' ? data.error : undefined,
+              },
+            }))
+          } catch (error) {
+            setEfforts((current) => ({
+              ...current,
+              [key]: { phase: 'ready', efforts: [], error: error?.message ?? String(error) },
+            }))
+          }
+        }
+
+        /**
+         * 面板一有链，就把所有候选的档位查一遍（串行 —— 后端每个查询都要
+         * 打一次上游 `resolveModelInfo`，并发会一起超时）。
+         */
+        React.useEffect(() => {
+          if (!Array.isArray(draft)) return undefined
+          let cancelled = false
+          void (async () => {
+            for (const chain of draft) {
+              for (const candidate of chain.candidates ?? []) {
+                if (cancelled) return
+                if (typeof candidate?.provider !== 'string' || typeof candidate?.model !== 'string') continue
+                if (efforts[labelOf(candidate)] !== undefined) continue
+                await loadEfforts(candidate)
+              }
+            }
+          })()
+          return () => {
+            cancelled = true
+          }
+        }, [draft, efforts])
 
         /**
          * 连通测试：POST /test，成功/失败都长成徽章。
@@ -905,6 +1138,34 @@
           for (const candidate of chains[picker.chainIndex].candidates) taken.add(labelOf(candidate))
         }
 
+        // 倍率来自后端快照（`publicChains` 把渠道显示名里的「x0.08」解析出来
+        // 挂在候选上）。草稿会丢掉这些只读字段，所以按 `provider/model` 建索引。
+        const rates = {}
+        for (const chain of Array.isArray(snapshot.chains) ? snapshot.chains : []) {
+          for (const candidate of Array.isArray(chain?.candidates) ? chain.candidates : []) {
+            if (typeof candidate?.provider !== 'string' || typeof candidate?.model !== 'string') continue
+            rates[`${candidate.provider}/${candidate.model}`] = candidate
+          }
+        }
+
+        /**
+         * 一条链可选的档位 = 链上各站支持档位的并集。
+         *
+         * 为什么不只取链头：链级档位要在每一站都合法，否则切到某一站就被宿主
+         * 以 `UNSUPPORTED_REASONING_EFFORT` 拒掉。取并集至少能让用户看见全貌，
+         * 具体哪站不支持由 `pickEffort` 在运行时降级。
+         */
+        const chainEffortsOf = (chain) => {
+          const merged = new Map()
+          for (const candidate of Array.isArray(chain?.candidates) ? chain.candidates : []) {
+            const state = efforts[labelOf(candidate)]
+            for (const effort of Array.isArray(state?.efforts) ? state.efforts : []) {
+              if (typeof effort?.id === 'string' && effort.id !== '' && !merged.has(effort.id)) merged.set(effort.id, effort)
+            }
+          }
+          return [...merged.values()]
+        }
+
         // 保存结果与「有未保存改动」是两件事，可以同时为真：保存失败了，草稿
         // 仍然脏。把失败原因盖住「有改动」会让人以为改动没了，所以并排显示。
         const saveNote = (() => {
@@ -940,23 +1201,73 @@
           h(
             'div',
             { className: 'dcf-section' },
-            h('h3', { className: 'dcf-section-title' }, t.chainTitle),
+            h(
+              'div',
+              { className: 'dcf-section-bar' },
+              h('h3', { className: 'dcf-section-title' }, t.chainTitle),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dcf-btn dcf-btn-mini',
+                  disabled: !editable || saving,
+                  onClick: addChain,
+                },
+                t.newChain,
+              ),
+            ),
+            h('p', { className: 'dcf-note' }, t.howto),
             chains.length === 0
               ? h('p', { className: 'dcf-note' }, t.noChains)
               : h(
                 'div',
                 { className: 'dcf-section' },
-                ...chains.map((chain, chainIndex) => h(
+                ...chains.map((chain, chainIndex) => {
+                  const chainEfforts = chainEffortsOf(chain)
+                  return h(
                   'div',
-                  { key: `${chain.name}-${chainIndex}`, className: 'dcf-card' },
+                  { key: `${chain.id ?? chain.name}-${chainIndex}`, className: 'dcf-card' },
                   h(
                     'div',
                     { className: 'dcf-chain-head' },
-                    h('span', { className: 'dcf-chain-name' }, chain.name),
+                    h('input', {
+                      type: 'text',
+                      className: 'dcf-input dcf-chain-name',
+                      value: chain.name,
+                      title: t.chainNameHint,
+                      placeholder: t.chainName,
+                      disabled: !editable || saving,
+                      onChange: (event) => renameChain(chainIndex, event.target.value),
+                    }),
+                    h(
+                      'select',
+                      {
+                        className: 'dcf-select',
+                        title: t.effortHint,
+                        value: typeof chain.reasoningEffort === 'string' ? chain.reasoningEffort : '',
+                        disabled: !editable || saving || chainEfforts.length === 0,
+                        onChange: (event) => setChainEffort(chainIndex, event.target.value),
+                      },
+                      h('option', { value: '' }, t.effortDefault),
+                      ...chainEfforts.map((effort) => h('option', { key: effort.id, value: effort.id }, effort.name)),
+                    ),
                     h('span', { className: 'dcf-chain-meta' }, chain.candidates.map((candidate) => candidate.provider).join(' → ')),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dcf-btn dcf-btn-mini dcf-btn-danger',
+                        title: chains.length <= 1 ? t.onlyOneChain : t.deleteChain,
+                        disabled: !editable || saving || chains.length <= 1,
+                        onClick: () => removeChain(chainIndex),
+                      },
+                      // 链的删除按钮用独立文案：候选行里也有一个「删除」，
+                      // 同名按钮并排会让用户（和探针）分不清删的是哪个。
+                      t.deleteChain,
+                    ),
                   ),
                   chain.candidates.length === 0
-                    ? h('p', { className: 'dcf-note' }, t.noChains)
+                    ? h('p', { className: 'dcf-note' }, t.noCandidate)
                     : h(
                       'div',
                       { className: 'dcf-section' },
@@ -971,7 +1282,10 @@
                         onMove: moveCandidate,
                         onRemove: removeCandidate,
                         onTest: (c) => void testCandidate(c),
+                        onEffort: setCandidateEffort,
                         test: tests[labelOf(candidate)],
+                        effortState: efforts[labelOf(candidate)],
+                        rate: rates[labelOf(candidate)],
                       })),
                     ),
                   h(
@@ -998,7 +1312,8 @@
                       },
                     })
                     : null,
-                )),
+                  )
+                }),
               ),
           ),
 

@@ -326,6 +326,7 @@ function snapshot(overrides = {}) {
     maxEvents: 60,
     chains: [
       {
+        id: 'flash-free-first',
         name: 'flash-free-first',
         candidates: [
           { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
@@ -358,6 +359,7 @@ function snapshot(overrides = {}) {
     file: '~/.dsh/channel-fallback/chains.json',
     defaults: overrides.chains ?? [
       {
+        id: 'flash-free-first',
         name: 'flash-free-first',
         candidates: [
           { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
@@ -528,7 +530,9 @@ check('apply 挂的 settings.section：id / order / label / 组件都对', () =>
 
 check('正常快照：链、计数、事件、失败原因与 HTTP 状态都在输出里', async () => {
   const { text } = await renderPanel(async () => jsonResponse(snapshot()))
-  assert.match(text, /flash-free-first/)
+  // v0.5.0 起链是模型选择器里的条目，标题栏是可编辑输入框，链名在 value 里
+  // 而不是文本节点，所以这里断言的是「链 id 没被当成用户可见的乱码」+
+  // 面板该有的信息都在。
   assert.match(text, /workbuddy/)
   assert.match(text, /buddy/)
   assert.match(text, /优先/)
@@ -540,6 +544,7 @@ check('正常快照：链、计数、事件、失败原因与 HTTP 状态都在�
   assert.match(text, /1\.8s/)
   assert.match(text, /2 次尝试/)
   assert.match(text, /直通/)
+  assert.match(text, /新建链/, 'v0.5.0 允许多链')
 })
 
 check('事件倒序：最新（win）排在较旧（skip）之上', async () => {
@@ -625,16 +630,19 @@ check('删除候选：草稿少一个，并提示有未保存改动', async () =
   const text = flatten(tree)
   assert.equal(countButtons(tree, '删除'), 1)
   assert.match(text, /有未保存的改动/)
-  assert.match(text, /flash-free-first/) // 链名不变
 })
 
-check('只剩一个候选时删除按钮被禁用（不能删空）', async () => {
+check('候选可以删到空（v0.5.0 起链允许没有模型）', async () => {
   const server = fakeServer()
   const mounted = await mountPanel(server.fetch)
   await act(() => clickButton(mounted.tree, '删除'))
-  const tree = await mounted.repaint()
-  const remove = findButton(tree, '删除')
-  assert.equal(remove.props.disabled, true, '删到只剩一个时不该再允许删')
+  let tree = await mounted.repaint()
+  await act(() => clickButton(tree, '删除'))
+  tree = await mounted.repaint()
+  const text = flatten(tree)
+  assert.equal(countButtons(tree, '删除'), 0, '两个候选都删掉了')
+  // 空链要给出可操作提示，而不是一片空白
+  assert.match(text, /这条链还没有模型/)
 })
 
 check('上移/下移改变顺序，且首尾按钮各自禁用', async () => {
@@ -673,8 +681,11 @@ check('保存：POST body 是草稿链，成功后提示已生效', async () => 
   assert.deepEqual(server.saves[0].chains[0].candidates, [
     { provider: 'buddy', model: 'deepseek-v4.1-flash' },
   ])
+  // v0.5.0：链 id 必须原样带回去 —— 它就是模型选择器里的 model id，
+  // 草稿丢掉 id 再保存等于把所有正在用这条链的会话的选择打散。
+  assert.equal(server.saves[0].chains[0].id, 'flash-free-first', '保存时链 id 不能丢')
   assert.equal(server.calls.filter((call) => call.method === 'POST').length, 1)
-  assert.match(flatten(tree), /已保存，下一个请求就走新链/)
+  assert.match(flatten(tree), /已保存/)
   assert.doesNotMatch(flatten(tree), /有未保存的改动/)
 })
 
@@ -731,6 +742,7 @@ check('添加模型：懒加载 /models，点一下加进草稿', async () => {
 
   await act(() => clickButton(picker, '+ 添加模型', 1))
   const tree = await mounted.repaint()
+  // 候选行从 2 个变 3 个（链的删除按钮文案是「删链」，不混进来）
   assert.equal(countButtons(tree, '删除'), 3, '加了一个候选')
   assert.match(flatten(tree), /glm-5\.3-flash/)
   assert.doesNotMatch(flatten(tree), /正在问各渠道/)

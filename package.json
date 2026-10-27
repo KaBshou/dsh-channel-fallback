@@ -1,7 +1,7 @@
 {
   "name": "dsh-channel-fallback",
-  "version": "0.4.0",
-  "description": "渠道回退 + 可编辑面板：给 DSH 装一条「优先 A、失败自动切 B」的模型链，带连通测试与可视化面板",
+  "version": "0.5.0",
+  "description": "渠道链：把「优先 A、失败自动切 B」的模型链注册成模型选择器里的一个条目，带可视化配置面板",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

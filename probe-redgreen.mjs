@@ -63,9 +63,14 @@ const cases = [
     expect: /没有 slots 服务时不抛错/,
   },
   {
-    title: '删到只剩一个也允许删 → 「只剩一个候选时删除被禁用」应变红',
-    mutate: (source) => source.replace('disabled: locked || total <= 1,', 'disabled: locked,'),
-    expect: /只剩一个候选时删除按钮被禁用/,
+    // v0.5.0 起链允许没有候选（面板提示「先加一个」），所以这条红绿测的是
+    // 另一件事：**空链必须给出可操作提示**，而不是一片空白。
+    title: '空链不显示提示 → 「候选可以删到空」应变红',
+    mutate: (source) => source.replace(
+      "? h('p', { className: 'dcf-note' }, t.noCandidate)",
+      "? null",
+    ),
+    expect: /候选可以删到空/,
   },
   {
     title: '第一个候选也能上移 → 「上移/下移改变顺序」应变红',
