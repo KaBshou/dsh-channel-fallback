@@ -1,0 +1,18 @@
+# npm/pnpm 安装痕迹
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# 探针运行时的临时状态（probe-* 会把 DSH_CHANNEL_FALLBACK_STATE 指到系统临时目录，
+# 但以防有人手动跑过留下文件）
+*.tmp
+*.tmp.*
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 系统文件
+Thumbs.db
+.DS_Store

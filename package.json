@@ -1,0 +1,65 @@
+{
+  "name": "dsh-channel-fallback",
+  "version": "0.4.0",
+  "description": "渠道回退 + 可编辑面板：给 DSH 装一条「优先 A、失败自动切 B」的模型链，带连通测试与可视化面板",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test lib/chain.test.js lib/state.test.js lib/store.test.js && node probe.mjs && node probe-panel.mjs && node probe-client.mjs && node probe-redgreen.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "channel",
+    "fallback",
+    "llm-provider",
+    "failover"
+  ],
+  "files": [
+    "lib/",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaBshou/dsh-channel-fallback.git"
+  },
+  "homepage": "https://github.com/KaBshou/dsh-channel-fallback#readme",
+  "bugs": {
+    "url": "https://github.com/KaBshou/dsh-channel-fallback/issues"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.1 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

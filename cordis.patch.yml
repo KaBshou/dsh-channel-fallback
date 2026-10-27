@@ -1,0 +1,16 @@
+# 让 DeepSeek V4.1 Flash 优先走国际版（免费额度），用不了自动切国内版。
+#
+# 这两条链的 provider 由 channel-pack 注册（id 就是裸名），所以这里直接写裸名。
+# 想改顺序 / 加第三个候选，改下面的 candidates 即可（改完重启 DSH 生效）。
+- insert:
+    - id: channel-fallback
+      name: dsh-channel-fallback
+      config:
+        enabled: true
+        chains:
+          - name: flash-free-first
+            candidates:
+              - provider: workbuddy
+                model: deepseek-v4.1-flash
+              - provider: buddy
+                model: deepseek-v4.1-flash
