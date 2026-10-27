@@ -517,6 +517,62 @@ function ok(name) {
   ok('倍率：解析渠道显示名并挂到候选上');
 }
 
+// ── 11b. 链级开关与自动档：写进去、读回来、不丢字段 ────────────────────────
+{
+  clearState();
+  const host = makeHost(() => streamOf([text('x'), stop]));
+  apply(host.ctx, CONFIG);
+
+  const saved = await callPath(host.routes[0], `${API}/chains`, 'POST', LOOPBACK_HEADERS, {
+    chains: [{
+      id: 'auto-probe',
+      name: 'auto-probe',
+      speedProbe: true,
+      reasoningEffort: null,
+      candidates: [
+        { provider: 'buddy', model: 'deepseek-v4.1-flash', reasoningEffort: null },
+        { provider: 'workbuddy', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' },
+      ],
+    }],
+  });
+  assert.equal(saved.status, 200);
+  const chain = JSON.parse(saved.body).chains[0];
+  assert.equal(chain.speedProbe, true, 'speedProbe 必须原样带回来');
+  assert.equal(chain.reasoningEffort, null, '链级自动档（null）不能被吞成「没设置」');
+  assert.equal(chain.candidates[0].reasoningEffort, null, '候选自动档同样要保住');
+
+  // 落盘的 JSON 里也必须是这些值（否则重启后用户的设置就变了）。
+  const onDisk = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  assert.equal(onDisk.chains[0].speedProbe, true);
+  assert.equal(onDisk.chains[0].reasoningEffort, null);
+  assert.equal(onDisk.chains[0].candidates[0].reasoningEffort, null);
+  ok('链级开关：speedProbe 与「自动」档位保存后原样读回（含落盘）');
+}
+
+// ── 11c. 写 "auto" 字符串与写 null 等价（面板两种写法都认）──────────────────
+{
+  clearState();
+  const host = makeHost(() => streamOf([text('x'), stop]));
+  apply(host.ctx, CONFIG);
+  const saved = await callPath(host.routes[0], `${API}/chains`, 'POST', LOOPBACK_HEADERS, {
+    chains: [{
+      id: 'auto-str',
+      name: 'auto-str',
+      reasoningEffort: 'auto',
+      candidates: [
+        { provider: 'buddy', model: 'deepseek-v4.1-flash', reasoningEffort: 'auto' },
+        { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+      ],
+    }],
+  });
+  assert.equal(saved.status, 200);
+  const chain = JSON.parse(saved.body).chains[0];
+  // 'auto' 不是任何 provider 的合法档位 id，必须归一化成 null 才不会被宿主拒。
+  assert.equal(chain.reasoningEffort, null);
+  assert.equal(chain.candidates[0].reasoningEffort, null);
+  ok('自动档：写 "auto" 与写 null 归一化成同一个值');
+}
+
 // ── 12. /efforts：查某站真实支持的档位 ─────────────────────────────────────
 {
   clearState();

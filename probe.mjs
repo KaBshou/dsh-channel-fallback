@@ -616,5 +616,85 @@ await test('上下文窗口：取链上各站最小值', async () => {
   assert.equal(info.context.contextWindow, 200_000);
 });
 
+// ── ⑲ 切换前测速：按实测速度重排剩下的候选 ────────────────────────────
+await test('切换前测速：按实测速度决定下一个试谁', async () => {
+  // 链头 workbuddy 秒失败；剩下 buddy（慢，60ms）与 trae（快，5ms）。
+  // 没开 speedProbe 时按原顺序试 buddy；开了就该先试 trae。
+  const threeChains = [{
+    id: 'three',
+    name: 'three',
+    speedProbe: true,
+    candidates: [
+      { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+      { provider: 'buddy', model: 'deepseek-v4.1-flash' },
+      { provider: 'trae', model: 'deepseek-v4.1-flash' },
+    ],
+  }];
+  const asked = [];
+  const host = await setup({
+    workbuddy: () => streamOf([failed('QUOTA_EXCEEDED')]),
+    buddy: () => {
+      asked.push('buddy');
+      return (async function* slow() {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        yield text('慢的那家');
+        yield stop;
+      })();
+    },
+    trae: () => {
+      asked.push('trae');
+      return streamOf([text('快的那家'), stop]);
+    },
+  }, { chains: threeChains });
+
+  const result = await ask(host, { chainId: 'three' });
+  assert.equal(result.text, '快的那家', '应该用测速后最快的那家回答');
+  // 探测阶段两家都被试过一次，之后正式请求打给 trae。
+  assert.ok(asked.includes('trae'), '快的那家应被选中');
+});
+
+// ── ⑳ 没开测速：老老实实按配置顺序走 ──────────────────────────────────
+await test('没开 speedProbe：按配置顺序切，不探测', async () => {
+  const threeChains = [{
+    id: 'three',
+    name: 'three',
+    candidates: [
+      { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+      { provider: 'buddy', model: 'deepseek-v4.1-flash' },
+      { provider: 'trae', model: 'deepseek-v4.1-flash' },
+    ],
+  }];
+  const host = await setup({
+    workbuddy: () => streamOf([failed('QUOTA_EXCEEDED')]),
+    buddy: () => streamOf([text('第二个'), stop]),
+    trae: () => streamOf([text('第三个'), stop]),
+  }, { chains: threeChains });
+
+  const result = await ask(host, { chainId: 'three' });
+  assert.equal(result.text, '第二个', '默认不探测，按原顺序');
+});
+
+// ── ㉑ 自动档：候选写 null 时上游请求里不带 reasoningEffort ─────────────
+await test('自动档：候选写 null 时请求里没有 reasoningEffort', async () => {
+  const seen = [];
+  const chains = [{
+    id: 'auto-chain',
+    name: 'auto-chain',
+    candidates: [
+      { provider: 'buddy', model: 'deepseek-v4.1-flash', reasoningEffort: null },
+      { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+    ],
+  }];
+  const host = await setup({
+    buddy: (options) => {
+      seen.push(options.reasoningEffort);
+      return streamOf([text('ok'), stop]);
+    },
+    workbuddy: () => streamOf([text('x'), stop]),
+  }, { chains });
+  await ask(host, { chainId: 'auto-chain', reasoningEffort: 'max' });
+  assert.deepEqual(seen, [undefined], '自动档必须让上游用它自己的默认值');
+});
+
 console.log(`\n全部 ${passed} 项编排验证通过。${failedCount === 0 ? '' : ` ${failedCount} 项失败。`}`);
 process.exit(failedCount === 0 ? 0 : 1);

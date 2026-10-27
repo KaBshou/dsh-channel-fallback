@@ -1,6 +1,6 @@
 {
   "name": "dsh-channel-fallback",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "渠道链：把「优先 A、失败自动切 B」的模型链注册成模型选择器里的一个条目，带可视化配置面板",
   "type": "module",
   "main": "./lib/index.js",
@@ -12,7 +12,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --test lib/chain.test.js lib/state.test.js lib/store.test.js && node probe.mjs && node probe-panel.mjs && node probe-client.mjs && node probe-redgreen.mjs"
+    "test": "node --test lib/chain.test.js lib/state.test.js lib/store.test.js lib/speed.test.js && node probe.mjs && node probe-panel.mjs && node probe-client.mjs && node probe-redgreen.mjs"
   },
   "keywords": [
     "dsh",

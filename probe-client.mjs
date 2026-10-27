@@ -864,6 +864,200 @@ check('editable 为 false 时「测试」按钮禁用', async () => {
 })
 
 // ---------------------------------------------------------------------------
+// v0.5.1：自动档 + 切换前测速
+// ---------------------------------------------------------------------------
+
+/** 找到所有 select 元素（按出现顺序）。 */
+function findSelects(node) {
+  const found = []
+  const walk = (current) => {
+    if (current === null || current === undefined || typeof current !== 'object') return
+    if (Array.isArray(current)) {
+      for (const child of current) walk(child)
+      return
+    }
+    if (current.type === 'select') found.push(current)
+    walk(current.props?.children ?? [])
+  }
+  walk(node)
+  return found
+}
+
+/**
+ * 按 className 找下拉框。
+ *
+ * 链头（含链级档位）渲染在候选行**之前**，所以不能靠「第几个 select」定位 ——
+ * 候选档位是 `.dcf-effort`，链级是 `.dcf-chain-effort`。
+ */
+function findSelectsByClass(node, className) {
+  return findSelects(node).filter((select) => String(select.props?.className ?? '').includes(className))
+}
+
+/** 找到某个下拉框里 value 为 `value` 的选项（验证「自动」这一项在不在）。 */
+function hasOption(select, value) {
+  return (select.props.children ?? []).some((option) => option?.props?.value === value)
+}
+
+/** 找到一个 checkbox（链头只有一个：切换前测速）。 */
+function findCheckbox(node) {
+  let found
+  const walk = (current) => {
+    if (found !== undefined || current === null || current === undefined || typeof current !== 'object') return
+    if (Array.isArray(current)) {
+      for (const child of current) walk(child)
+      return
+    }
+    if (current.type === 'input' && current.props?.type === 'checkbox') {
+      found = current
+      return
+    }
+    walk(current.props?.children ?? [])
+  }
+  walk(node)
+  return found
+}
+
+check('档位下拉：有「自动」这一项，且选了之后存成 null', async () => {
+  const server = fakeServer()
+  const mounted = await mountPanel(server.fetch)
+  const candidateSelects = findSelectsByClass(mounted.tree, 'dcf-effort')
+  assert.ok(candidateSelects.length >= 1, `应该有候选档位下拉，实际 ${candidateSelects.length}`)
+  assert.equal(hasOption(candidateSelects[0], 'auto'), true, '候选档位下拉里必须有「自动」')
+
+  // 选「自动」→ 草稿里存 null（不是字符串 'auto'，那会被宿主当成非法档位）。
+  candidateSelects[0].props.onChange({ target: { value: 'auto' } })
+  await act(() => {})
+  const edited = await mounted.repaint()
+  await act(() => clickButton(edited, '保存'))
+  const tree = await mounted.repaint()
+  assert.equal(server.saves.length, 1)
+  assert.equal(server.saves[0].chains[0].candidates[0].reasoningEffort, null, '自动档要存成 null')
+  assert.doesNotMatch(flatten(tree), /有未保存的改动/)
+})
+
+check('档位下拉：清空 = 删掉字段（不写 null，也不算脏设置）', async () => {
+  const server = fakeServer({
+    snapshot: {
+      chains: [{
+        id: 'flash-free-first',
+        name: 'flash-free-first',
+        candidates: [
+          { provider: 'workbuddy', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' },
+          { provider: 'buddy', model: 'deepseek-v4.1-flash' },
+        ],
+      }],
+    },
+  })
+  const mounted = await mountPanel(server.fetch)
+  const candidateSelects = findSelectsByClass(mounted.tree, 'dcf-effort')
+  candidateSelects[0].props.onChange({ target: { value: '' } })
+  await act(() => {})
+  const ready = await mounted.repaint()
+  await act(() => clickButton(ready, '保存'))
+  await mounted.repaint()
+  const saved = server.saves[0].chains[0].candidates[0]
+  assert.equal('reasoningEffort' in saved, false, '「跟随上游默认」= 字段不存在，而不是 null')
+})
+
+check('链级档位：读回 null（整条链自动）时下拉显示「自动」而不是「跟随默认」', async () => {
+  const server = fakeServer({
+    snapshot: {
+      chains: [{
+        id: 'flash-free-first',
+        name: 'flash-free-first',
+        reasoningEffort: null,
+        candidates: [
+          { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+          { provider: 'buddy', model: 'deepseek-v4.1-flash' },
+        ],
+      }],
+    },
+  })
+  const mounted = await mountPanel(server.fetch)
+  const chainSelects = findSelectsByClass(mounted.tree, 'dcf-chain-effort')
+  assert.equal(chainSelects.length, 1, '链头应该有一个链级档位下拉')
+  assert.equal(chainSelects[0].props.value, 'auto', 'null 必须显示成「自动」，不能退回「跟随默认」')
+})
+
+check('切换前测速：复选框能开，开启后保存带 speedProbe:true', async () => {
+  const server = fakeServer()
+  const mounted = await mountPanel(server.fetch)
+  const checkbox = findCheckbox(mounted.tree)
+  assert.notEqual(checkbox, undefined, '链头应该有「切换前测速」复选框')
+  assert.equal(checkbox.props.checked, false, '默认必须是关的（探测要花时间+额度）')
+
+  checkbox.props.onChange({ target: { checked: true } })
+  await act(() => {})
+  const ready = await mounted.repaint()
+  await act(() => clickButton(ready, '保存'))
+  const tree = await mounted.repaint()
+  assert.equal(server.saves[0].chains[0].speedProbe, true)
+  assert.doesNotMatch(flatten(tree), /有未保存的改动/)
+})
+
+check('切换前测速：快照里 speedProbe 为 true 时复选框是勾上的', async () => {
+  const server = fakeServer({
+    snapshot: {
+      chains: [{
+        id: 'flash-free-first',
+        name: 'flash-free-first',
+        speedProbe: true,
+        candidates: [
+          { provider: 'workbuddy', model: 'deepseek-v4.1-flash' },
+          { provider: 'buddy', model: 'deepseek-v4.1-flash' },
+        ],
+      }],
+    },
+  })
+  const mounted = await mountPanel(server.fetch)
+  const box = findCheckbox(mounted.tree)
+  assert.equal(box?.props?.checked, true, '读回来的 speedProbe 要体现在勾选状态上')
+})
+
+check('事件流：probe 事件显示「测速」与最快的那家', async () => {
+  // 链留空：链头的「切换前测速」复选框文案里也有「测速」二字，留着它会让
+  // 断言变得什么都匹配得上（红绿验证就是这么抓出假绿的）。
+  const server = fakeServer({
+    snapshot: {
+      chains: [],
+      events: [
+        {
+          at: 1793000002000,
+          type: 'probe',
+          chain: 'flash-free-first',
+          probes: [
+            { provider: 'buddy', model: 'deepseek-v4.1-flash', ok: false, ms: 6000, error: 'TIMEOUT' },
+            { provider: 'trae', model: 'deepseek-v4.1-flash', ok: true, ms: 812 },
+          ],
+        },
+      ],
+    },
+  })
+  const mounted = await mountPanel(server.fetch)
+  const text = flatten(mounted.tree)
+  assert.match(text, /测速/, 'probe 事件要有自己的类型标签')
+  assert.match(text, /trae\/deepseek-v4\.1-flash/, '应显示探通的那家')
+  assert.match(text, /812ms/)
+})
+
+check('事件流：全部探不通时给一句「按原顺序继续」', async () => {
+  const server = fakeServer({
+    snapshot: {
+      events: [
+        {
+          at: 1793000002000,
+          type: 'probe',
+          chain: 'flash-free-first',
+          probes: [{ provider: 'buddy', model: 'deepseek-v4.1-flash', ok: false, ms: 6000, error: 'TIMEOUT' }],
+        },
+      ],
+    },
+  })
+  const mounted = await mountPanel(server.fetch)
+  assert.match(flatten(mounted.tree), /都探不通，按原顺序继续/)
+})
+
+// ---------------------------------------------------------------------------
 // 执行
 // ---------------------------------------------------------------------------
 let failed = 0

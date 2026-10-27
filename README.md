@@ -86,6 +86,10 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
 | 链级 | 面板上链标题旁的下拉，作用于链上所有没写固定档位的站 |
 | 调用方 | 会话/选择器传进来的 `reasoningEffort` |
 
+三个下拉都有同一个选项：**「自动」**（存成 `null`）。它的意思不是「没设置」，
+而是「到这一层就停，别往下继承」—— 用户明确说了自动，插件就别自作主张。
+这和「留空」不同：留空 = 字段不存在 = 继续往下继承。
+
 为什么候选固定优先于链级：链上不同 provider 支持的档位可能根本不同
 （`workbuddy` 只有 `high`，`buddy` 有 `low`/`high`/`max`）。链级选 `low` 切到
 `workbuddy` 就会被宿主以 `UNSUPPORTED_REASONING_EFFORT` 拒掉。
@@ -95,11 +99,30 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
 
 降级规则（`pickEffort`）：
 
-- 候选写了 `null` → 这一站不指定档位（让上游用默认），不再往下找；
+- 候选写了 `null`（面板上的「自动」）→ 这一站不指定档位（让上游用默认），不再往下找；
+- 链级写了 `null` → 整条链都用上游默认，**连调用方也不看**；
 - 候选/链级/调用方给了档位，但**这一站明确不支持** → 继续往下退，
   最后都退不了就删掉字段；
 - **查不到**这一站支持什么（provider 离线、目录里没这个模型）→ **不猜，放行**，
   让宿主抛准确的错误 —— 猜错比报错更糟。
+
+## 切换前测速
+
+链的顺序是**静态**的，上游的可用性和速度是**动态**的。链头挂了以后，
+配置里的第二个不一定就是现在最快的那个。
+
+打开链标题旁的「切换前测速」后：**真要换站的那一刻**，并发给剩下的每一站
+发一个极小的探测请求（`maxTokens: 1`，问 `hi`），按实测首字延迟重排，
+再按新顺序继续切。
+
+- 探测**不继承**思考档位（否则测到的是「思考多久」而不是「多久能开口」）；
+- 只探**剩下的**候选，已经试过的不重复探；
+- 探不通的排最后，但**不剔除** —— 万一探测本身被限流，它还有机会；
+- 探测失败（异常/超时）就按原顺序继续，探测不该拖垮这次调用；
+- 一次调用**只测一次**（每站都重测会让一次失败变成 N 次探测，越切越慢）。
+
+代价：每次切换多 1–3 秒 + 一点额度。所以**默认关**，只认显式 `speedProbe: true`。
+面板事件流里会多一类「测速」事件，显示探通的那家和耗时。
 
 ## 配置
 
@@ -114,11 +137,14 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
         chains:
           - id: flash-free-first
             name: flash-free-first
+            reasoningEffort: auto        # 整条链都用上游默认档位
+            speedProbe: true             # 切换前并发测速，按实测最快切
             candidates:
               - provider: workbuddy
                 model: deepseek-v4.1-flash
               - provider: buddy
                 model: deepseek-v4.1-flash
+                reasoningEffort: high    # 这一站固定 high
 ```
 
 可选字段：
@@ -128,8 +154,9 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
 | `enabled: false` | 整体关闭（不注册 provider） |
 | `id` | 链的 id = **模型选择器里的 model id**。不写则按 `name` 自动 slug |
 | `name` | 显示名，也是选择器里那一行 |
-| `reasoningEffort` | 链级档位 |
-| `candidates[].reasoningEffort` | 字符串 = 固定该站档位；`null` = 不指定（用上游默认） |
+| `reasoningEffort` | 链级档位：字符串 = 固定；`null` 或 `'auto'` = **整条链自动**（连调用方也不看） |
+| `speedProbe` | `true` = 切换前并发测速、按实测速度重排。**只认显式 true**，缺省关 |
+| `candidates[].reasoningEffort` | 字符串 = 固定该站档位；`null` 或 `'auto'` = 这一站自动（不再往下继承） |
 | `candidates[].maxTokens` | 正整数 = 覆盖；`null` = 删掉该字段 |
 
 配置非法时**静默不注册**，绝不让宿主起不来。
@@ -140,7 +167,7 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
 
 设置页里多一个 **「渠道链」** 分区，显示：
 
-- **链**：每条链一张卡片，链名可改、链级档位可选、带删除按钮；
+- **链**：每条链一张卡片，链名可改、链级档位可选、带**「切换前测速」开关**与删除按钮；
   每个候选一行，带序号、「优先」/「兜底」标签、渠道名、**倍率**、
   **推理档位下拉**，右侧是 `测试` `↑` `↓` `删除`；
 - **计数**：请求 / 切换 / 成功 / 全挂 / 取消 / 直通 六格；
@@ -155,9 +182,10 @@ llm.registerAdapter([providerId], { providerInfo, providerRetryPolicy, listModel
 |---|---|
 | `+ 新建链` | 追加一条空链，名字自动编号，id 按名字 slug（冲突则加 `-2`） |
 | 链名输入框 | 改名，**同时换新 id** —— 同名不同 id 会让选择器里出现两个看不出区别的条目 |
-| 链级档位下拉 | 选项 = 链上各站档位的**并集**（具体降级由运行时处理） |
+| 链级档位下拉 | 选项 = 链上各站档位的**并集**（具体降级由运行时处理）；第一项「跟随上游默认」，第二项「自动」 |
+| 「切换前测速」 | 勾上后，链头失败要换站时会先并发探测剩下的站，按实测速度决定顺序（见上文「切换前测速」） |
 | `删链` | 删掉整条链；**只剩一条时禁用** |
-| 候选档位下拉 | 每站固定档位；第一项是「跟随上游默认」 |
+| 候选档位下拉 | 每站固定档位；选项顺序「跟随上游默认」→「自动」→ 该站真实支持的档位 |
 | `↑` / `↓` | 调整候选顺序 —— **第一个永远是优先尝试的那站** |
 | `删除` | 从链里去掉一个候选（链**允许没有候选**，面板会提示「先加一个」） |
 | `+ 添加模型` | 弹出模型清单，按渠道筛选，点一下加进链尾；已在链里的显示「已加入」且不可点 |
@@ -309,16 +337,21 @@ npm test
 等价于依次跑：
 
 ```powershell
-node --test lib/chain.test.js lib/state.test.js lib/store.test.js   # 41 项单测（链 16 + 记录 8 + 持久层 17）
-node probe.mjs           # 18 项整链编排验证（假 ctx 复刻宿主 adapter 语义）
-node probe-panel.mjs     # 40 项宿主面板验证（路由、保存、列模型、档位查询、热生效、413/写盘失败、信任栅栏 5 组、方法限制、连通测试）
-node probe-client.mjs    # 28 项浏览器侧验证（mini React + 假 DOM + vm 求值真实 client.js，含新建/改名/删链/档位/保存/恢复默认/测试按钮）
-node probe-redgreen.mjs  # 17 项红绿验证（内存里改坏 client.js，断言对应用例真的会红）
+node --test lib/chain.test.js lib/state.test.js lib/store.test.js lib/speed.test.js
+                          # 59 项单测（链 24 + 记录 8 + 持久层 17 + 测速 11）
+node probe.mjs           # 21 项整链编排验证（假 ctx 复刻宿主 adapter 语义，含测速与自动档）
+node probe-panel.mjs     # 42 项宿主面板验证（路由、保存、列模型、档位查询、热生效、413/写盘失败、信任栅栏 5 组、方法限制、连通测试、自动档/测速落盘）
+node probe-client.mjs    # 35 项浏览器侧验证（mini React + 假 DOM + vm 求值真实 client.js，含新建/改名/删链/档位/自动/测速开关/保存/恢复默认/测试按钮）
+node probe-redgreen.mjs  # 25 项红绿验证（内存里改坏 client.js，断言对应用例真的会红）
 ```
 
 最后那个 `probe-redgreen.mjs` 是为了防止「测试全绿但其实什么都没测到」：它把
 `client.js` 的源码在**内存里**改坏（不碰磁盘），让 probe-client 编译一份临时文件
-去跑，断言「必须失败，而且失败的正是该失败的那条用例」。17 条突变全部被抓住。
+去跑，断言「必须失败，而且失败的正是该失败的那条用例」。25 条突变全部被抓住。
+
+红绿验证抓到过一次**假绿**，值得记：断言 probe 事件行里有「测速」二字，
+但链头复选框的文案「切换前**测速**」也含这两个字 —— 于是那条断言永远成立。
+修法是让该用例的夹具用 `chains: []`（页面上没有复选框），断言才真正指向事件行。
 
 `probe-client.mjs` 里两个替身细节值得记：`expand()` **必须递归进普通元素的 children**，
 否则 `Page` 里的子组件节点不会被展开 —— 文字仍能渲出来（看起来一切正常），但一个按钮
@@ -363,6 +396,23 @@ name = flash-free-first（workbuddy/deepseek-v4.1-flash → buddy/deepseek-v4.1-
 
 `switches: 1` 就是自动切换的铁证。
 
+### v0.5.1 真机验证（已通过，2026-10-27）
+
+临时 profile（端口 3099）+ 隔离状态文件跑真实进程：
+
+- **自动档落盘正确**：`POST /chains` 写 `reasoningEffort: null` / `'auto'`，读回都是
+  `null`（链级与候选级都对），磁盘 JSON 也是 `null`；
+- **测速开关落盘正确**：`speedProbe: true` 保存后原样读回；
+- **成环防护**：候选写 `dsh-channel-chain` → 400；
+- **`/efforts` 正常**：`buddy/deepseek-v4.1-flash` → `["low","high","max"]` 默认 `high`；
+- **测速排序接真实上游跑通**（`lib/speed.js` 直连 8326 网关的 OpenAI 兼容流）：
+
+  ```
+  单站探测：buddy 4064ms / trae 2838ms / workbuddy 1978ms
+  并发探测：buddy 1890ms, workbuddy 3236ms, trae 3237ms
+  排序结果：buddy → workbuddy → trae      ← 按实测最快排，不是配置顺序
+  ```
+
 诊断日志（每次切换写一行）：
 
 ```powershell
@@ -372,6 +422,9 @@ $env:DSH_CHANNEL_FALLBACK_LOG = '1'
 
 ## 版本
 
+- **v0.5.1** — 档位「自动」（`null`/`'auto'`，到这一层就停，不再往下继承）+
+  链级「切换前测速」（`speedProbe`，切换时并发探测剩余候选、按实测首字延迟重排，
+  默认关）。59 单测 + 21 编排 + 42 面板 + 35 客户端 + 25 红绿全绿。
 - **v0.5.0** — 架构转向：链从「llm/stream 拦截器」变成「模型选择器里的一个 provider」。
   新增多链（新建/改名/删除）、倍率显示、每站与链级推理档位、`/efforts` 接口、
   `warm()` 倍率预热、`handedOff` 修 socket 泄漏。41 单测 + 18 编排 + 40 面板 +

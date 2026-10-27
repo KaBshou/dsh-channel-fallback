@@ -132,6 +132,70 @@ const cases = [
     ),
     expect: /连通测试：成功显示 ✓ 徽章与耗时/,
   },
+  {
+    // v0.5.1：候选档位下拉里没有「自动」这一项 → 对应用例必须变红。
+    title: '候选档位下拉去掉「自动」选项 → 「有自动这一项」应变红',
+    mutate: (source) => source.replace(
+      "h('option', { value: 'auto' }, t.effortAuto),\n            ...efforts.map",
+      "...efforts.map",
+    ),
+    expect: /档位下拉：有「自动」这一项/,
+  },
+  {
+    // 「自动」存成字符串 'auto' 而不是 null → 上游会以非法档位拒掉整次调用。
+    title: "选「自动」时存字符串 'auto' 而不是 null → 「选了之后存成 null」应变红",
+    mutate: (source) => source.replace(
+      "else if (value === 'auto') next.reasoningEffort = null",
+      "else if (value === 'auto') next.reasoningEffort = 'auto'",
+    ),
+    expect: /档位下拉：有「自动」这一项，且选了之后存成 null/,
+  },
+  {
+    title: '清空档位时写 null 而不是删字段 → 「清空 = 删掉字段」应变红',
+    mutate: (source) => source.replace(
+      "if (value === '') delete next.reasoningEffort\n            else if (value === 'auto') next.reasoningEffort = null",
+      "if (value === '') next.reasoningEffort = null\n            else if (value === 'auto') next.reasoningEffort = null",
+    ),
+    expect: /档位下拉：清空 = 删掉字段/,
+  },
+  {
+    // 链级档位读回 null 时退回「跟随默认」= 用户选的自动静默丢了。
+    title: '链级下拉不认 null → 「读回 null 显示自动」应变红',
+    mutate: (source) => source.replace(
+      "value: chain.reasoningEffort === null\n                          ? 'auto'\n                          : typeof chain.reasoningEffort === 'string'\n                            ? chain.reasoningEffort\n                            : '',",
+      "value: typeof chain.reasoningEffort === 'string' ? chain.reasoningEffort : '',",
+    ),
+    expect: /链级档位：读回 null（整条链自动）时下拉显示「自动」/,
+  },
+  {
+    title: '复选框不读 chain.speedProbe → 「勾选状态」应变红',
+    mutate: (source) => source.replace(
+      'checked: chain.speedProbe === true,',
+      'checked: false,',
+    ),
+    expect: /切换前测速：快照里 speedProbe 为 true 时复选框是勾上的/,
+  },
+  {
+    title: '勾选复选框不写 speedProbe → 「开启后保存带 speedProbe」应变红',
+    mutate: (source) => source.replace(
+      'if (on) next.speedProbe = true\n              else delete next.speedProbe',
+      'delete next.speedProbe',
+    ),
+    expect: /切换前测速：复选框能开，开启后保存带 speedProbe:true/,
+  },
+  {
+    title: 'probe 事件不给类型标签 → 「测速」应变红',
+    mutate: (source) => source.replace('probe: t.typeProbe,', 'probe: event.type,'),
+    expect: /事件流：probe 事件显示「测速」与最快的那家/,
+  },
+  {
+    title: 'probe 事件不显示最快的那家 → 「显示探通的那家」应变红',
+    mutate: (source) => source.replace(
+      "parts.push({ key: 'fastest', text: `${fast.provider}/${fast.model}`, mono: true })",
+      '',
+    ),
+    expect: /事件流：probe 事件显示「测速」与最快的那家/,
+  },
 ]
 
 /** 用突变后的 client.js 跑一次 probe，返回 { ok, text }。 */

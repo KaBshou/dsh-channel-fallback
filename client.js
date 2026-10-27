@@ -54,6 +54,9 @@
       chainNameHint: '链名会显示在模型选择器里；改链名会同时换一个新的链 id。',
       chainEffort: '整条链的档位',
       effortDefault: '跟随上游默认',
+      effortAuto: '自动（这一站自己定）',
+      speedProbe: '切换前测速',
+      speedProbeHint: '开启后，链头失败要换站时会先并发试一下剩下的站谁最快，按实测速度决定顺序。代价是切换会多花 1–3 秒和一点额度。',
       effortUnsupported: '不支持档位',
       effortLoading: '查档位…',
       effortHint: '候选自己选了档位就以候选为准；否则用这里；都没选就交给上游默认。',
@@ -108,6 +111,8 @@
       typeWin: '成功',
       typeExhausted: '全挂',
       typeAborted: '取消',
+      typeProbe: '测速',
+      probeNone: '都探不通，按原顺序继续',
       attempts: '{n} 次尝试',
       logOn: '诊断日志已开',
       logOff: '诊断日志未开',
@@ -135,6 +140,9 @@
       chainNameHint: 'The name shows up in the model picker; renaming also gives the chain a new id.',
       chainEffort: 'Chain-wide reasoning effort',
       effortDefault: 'Follow upstream default',
+      effortAuto: 'Auto (this site decides)',
+      speedProbe: 'Probe before switching',
+      speedProbeHint: 'When on, if the first candidate fails, the remaining ones are probed concurrently and tried in measured-speed order. Costs 1–3s and a little quota per switch.',
       effortUnsupported: 'No effort levels',
       effortLoading: 'Loading efforts…',
       effortHint: 'A candidate that pins its own effort wins; otherwise this applies; otherwise the upstream default.',
@@ -189,6 +197,8 @@
       typeWin: 'win',
       typeExhausted: 'exhausted',
       typeAborted: 'aborted',
+      typeProbe: 'probe',
+      probeNone: 'all failed, keeping order',
       attempts: '{n} attempts',
       logOn: 'Diagnostic log on',
       logOff: 'Diagnostic log off',
@@ -263,6 +273,10 @@
   color: var(--dsw-alias-label-primary); }
 .dcf-input:disabled, .dcf-select:disabled { opacity: .6; cursor: default; }
 .dcf-select { flex: 0 0 auto; max-width: 200px; }
+.dcf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+  color: var(--dsw-alias-fg-secondary, #8b8b8b); white-space: nowrap; cursor: pointer; }
+.dcf-check input { margin: 0; cursor: pointer; }
+.dcf-check input:disabled { cursor: default; }
 .dcf-row { display: grid; grid-template-columns: 30px 1fr auto auto; gap: 8px; align-items: center;
   padding: 6px 8px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-layer-2); }
@@ -374,7 +388,11 @@
           }),
       }
       if (typeof chain?.id === 'string' && chain.id !== '') out.id = chain.id
-      if (typeof chain?.reasoningEffort === 'string') out.reasoningEffort = chain.reasoningEffort
+      // `null` 表示「整条链自动」，是**有意义的取值**，不能用 typeof 过滤掉。
+      if (chain?.reasoningEffort === null || typeof chain?.reasoningEffort === 'string') {
+        out.reasoningEffort = chain.reasoningEffort
+      }
+      if (chain?.speedProbe === true) out.speedProbe = true
       return out
     })
   }
@@ -516,6 +534,7 @@
           win: t.typeWin,
           exhausted: t.typeExhausted,
           aborted: t.typeAborted,
+          probe: t.typeProbe,
         }[event.type] || event.type
 
         const parts = []
@@ -525,6 +544,17 @@
         if (event.type === 'win') {
           if (Number.isFinite(event.elapsedMs)) parts.push({ key: 'elapsed', text: humanMs(event.elapsedMs) })
           if (Number.isFinite(event.attempts)) parts.push({ key: 'attempts', text: fill(t.attempts, event.attempts) })
+        }
+        if (event.type === 'probe' && Array.isArray(event.probes)) {
+          // 只显示「探通了、按速度排好」的结论，别把每一站的毫秒数堆上去 ——
+          // 那行会很长，而用户真正要看的只是「为什么下一个试的是这家」。
+          const fast = event.probes.find((probe) => probe.ok === true)
+          if (fast !== undefined) {
+            parts.push({ key: 'fastest', text: `${fast.provider}/${fast.model}`, mono: true })
+            parts.push({ key: 'fastestMs', text: humanMs(Number.isFinite(fast.ms) ? fast.ms : 0) })
+          } else {
+            parts.push({ key: 'none', text: t.probeNone })
+          }
         }
 
         const failure = event.type === 'skip' && event.failure !== undefined
@@ -597,7 +627,12 @@
         const label = labelOf(candidate)
         const running = test !== undefined && test.phase === 'running'
         const efforts = Array.isArray(effortState?.efforts) ? effortState.efforts : []
-        const effortValue = typeof candidate.reasoningEffort === 'string' ? candidate.reasoningEffort : ''
+        // 三态：'' = 没设置（跟随上层）；'auto' = 这一站自动（null）；其余 = 固定档位。
+        const effortValue = candidate.reasoningEffort === null
+          ? 'auto'
+          : typeof candidate.reasoningEffort === 'string'
+            ? candidate.reasoningEffort
+            : ''
         const effortTitle = effortState?.phase === 'loading' ? t.effortLoading : efforts.length === 0 ? t.effortUnsupported : t.effortHint
         return h(
           'div',
@@ -623,13 +658,14 @@
           h(
             'select',
             {
-              className: 'dcf-select',
+              className: 'dcf-select dcf-effort',
               title: effortTitle,
               value: effortValue,
               disabled: locked || efforts.length === 0,
               onChange: (event) => onEffort(chainIndex, index, event.target.value),
             },
             h('option', { value: '' }, t.effortDefault),
+            h('option', { value: 'auto' }, t.effortAuto),
             ...efforts.map((effort) => h('option', { key: effort.id, value: effort.id }, effort.name)),
           ),
           h(
@@ -917,27 +953,50 @@
           editCandidates(chainIndex, (list) => list.filter((_, at) => at !== index))
         }
 
-        /** 改某一站固定的档位；空字符串 = 不指定（跟随链级/调用方）。 */
+        /**
+         * 改某一站固定的档位。
+         *
+         * 三态：
+         *   · `''`   → 删掉字段（不指定，跟随链级/调用方）；
+         *   · `'auto'` → 存成 `null`（这一站用它自己的默认档位，不再往下继承）；
+         *   · 其它   → 固定档位 id。
+         */
         const setCandidateEffort = (chainIndex, index, value) => {
           editCandidates(chainIndex, (list) => list.map((candidate, at) => {
             if (at !== index) return candidate
             const next = { ...candidate }
             if (value === '') delete next.reasoningEffort
+            else if (value === 'auto') next.reasoningEffort = null
             else next.reasoningEffort = value
             return next
           }))
         }
 
-        /** 改链级档位；空字符串 = 不指定。 */
+        /** 改链级档位；三态同上（`'auto'` → `null` = 整条链自动）。 */
         const setChainEffort = (chainIndex, value) => {
-          const patch = value === '' ? { reasoningEffort: undefined } : { reasoningEffort: value }
           setDraft((current) => {
             if (!Array.isArray(current)) return current
             return current.map((chain, index) => {
               if (index !== chainIndex) return chain
               const next = { ...chain }
-              if (patch.reasoningEffort === undefined) delete next.reasoningEffort
-              else next.reasoningEffort = patch.reasoningEffort
+              if (value === '') delete next.reasoningEffort
+              else if (value === 'auto') next.reasoningEffort = null
+              else next.reasoningEffort = value
+              return next
+            })
+          })
+          setSavePhase('idle')
+        }
+
+        /** 开关「切换前测速」。 */
+        const setSpeedProbe = (chainIndex, on) => {
+          setDraft((current) => {
+            if (!Array.isArray(current)) return current
+            return current.map((chain, index) => {
+              if (index !== chainIndex) return chain
+              const next = { ...chain }
+              if (on) next.speedProbe = true
+              else delete next.speedProbe
               return next
             })
           })
@@ -1242,14 +1301,33 @@
                     h(
                       'select',
                       {
-                        className: 'dcf-select',
+                        className: 'dcf-select dcf-chain-effort',
                         title: t.effortHint,
-                        value: typeof chain.reasoningEffort === 'string' ? chain.reasoningEffort : '',
+                        value: chain.reasoningEffort === null
+                          ? 'auto'
+                          : typeof chain.reasoningEffort === 'string'
+                            ? chain.reasoningEffort
+                            : '',
                         disabled: !editable || saving || chainEfforts.length === 0,
                         onChange: (event) => setChainEffort(chainIndex, event.target.value),
                       },
                       h('option', { value: '' }, t.effortDefault),
+                      h('option', { value: 'auto' }, t.effortAuto),
                       ...chainEfforts.map((effort) => h('option', { key: effort.id, value: effort.id }, effort.name)),
+                    ),
+                    h(
+                      'label',
+                      {
+                        className: 'dcf-check',
+                        title: t.speedProbeHint,
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: chain.speedProbe === true,
+                        disabled: !editable || saving,
+                        onChange: (event) => setSpeedProbe(chainIndex, event.target.checked),
+                      }),
+                      ` ${t.speedProbe}`,
                     ),
                     h('span', { className: 'dcf-chain-meta' }, chain.candidates.map((candidate) => candidate.provider).join(' → ')),
                     h(
